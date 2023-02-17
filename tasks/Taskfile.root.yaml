@@ -1,0 +1,32 @@
+# https://taskfile.dev
+version: "3"
+
+tasks:
+  default:
+    desc: The default task that will be run when task is called without explicit task name
+    aliases:
+      - all
+    cmds:
+      - task: install_packages
+      - task: add_and_config_user
+      - task: add_targets
+  
+  install_packages:
+    desc: Installs required os packages
+    cmds:
+      - apk add -U sudo shadow bash curl curl-dev git
+      - apk add -U zig crane -X https://dl-cdn.alpinelinux.org/alpine/edge/testing/
+  
+  add_and_config_user:
+    cmds:
+      - adduser --uid $USER_ID --ingroup root --system --shell /bin/bash --disabled-password $USER
+      - echo "$USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USER
+      - chmod 0440 /etc/sudoers.d/$USER
+
+  add_targets:
+    desc: Adds the cross compilation targets
+    cmds:
+      - >-
+        ./rustup target add x86_64-unknown-linux-musl
+        aarch64-unknown-linux-musl 
+        aarch64-apple-darwin
