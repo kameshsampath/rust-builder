@@ -27,6 +27,6 @@ tasks:
     desc: Adds the cross compilation targets
     cmds:
       - >-
-        ./rustup target add x86_64-unknown-linux-musl
+        rustup target add x86_64-unknown-linux-musl
         aarch64-unknown-linux-musl 
         aarch64-apple-darwin
