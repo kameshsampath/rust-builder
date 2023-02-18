@@ -1,0 +1,32 @@
+# https://taskfile.dev
+
+version: "3"
+
+vars:
+  BUILDER: buildx-multi-arch
+  IMAGE: kameshsampath/rust-zig-builder:test
+  DOCKER_FILE: Dockerfile
+
+tasks:
+  prepare-buildx:
+    desc: prepare the docker buildx environment
+    cmds:
+      - docker buildx inspect "{{.BUILDER}}" || docker buildx create --name="{{.BUILDER}}" --driver=docker-container --driver-opt=network=host
+    silent: true
+
+  builder-image:
+    desc: build the rust builder image that will be used with ci task. The builder can build targets for linux arm64/amd64
+    deps:
+      - prepare-buildx
+    sources:
+      - "{{.DOCKER_FILE}}"
+      -  "tasks/**/*.yaml"
+    cmds:
+      - docker buildx build --no-cache --builder="{{.BUILDER}}" -t "{{.IMAGE}}" --push --platform=linux/amd64 --platform=linux/arm64 -f {{.DOCKER_FILE}} .
+
+  builder-debug:
+    desc: run and shell into builder image, usually used for testing and debugging
+    deps:
+      - builder-image
+    cmds:
+      - docker run -it --rm -v "$PWD/test:/work" -w "/work" "{{.IMAGE}}"
