@@ -30,3 +30,12 @@ tasks:
       - builder-image
     cmds:
       - docker run -it --rm -v "$PWD/test:/work" -w "/work" "{{.IMAGE}}"
+
+  release:
+    desc: prepare for release, git tag and push
+    cmds:
+      - git tag -m "Release {{.RELEASE_TAG}}"
+      - git push origin --tags
+    vars:
+      RELEASE_TAG:
+        sh: svu next
