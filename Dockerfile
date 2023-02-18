@@ -33,6 +33,8 @@ COPY tasks/Taskfile.root.yaml ./Taskfile.yaml
 
 RUN task
 
-USER $USER
+# default run as root
 
-ENV PATH=/usr/local/cargo/bin:$PATH
+# USER $USER
+
+# ENV PATH=/usr/local/cargo/bin:$PATH
