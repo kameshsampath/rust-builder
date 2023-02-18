@@ -9,24 +9,90 @@ tasks:
     cmds:
       - task: install_packages
       - task: add_and_config_user
-      - task: add_targets
-  
+      - task: install_rust
+      - task: fix_permissions
+
   install_packages:
     desc: Installs required os packages
+    silent: true
     cmds:
-      - apk add -U sudo shadow bash curl curl-dev git
-      - apk add -U zig crane -X https://dl-cdn.alpinelinux.org/alpine/edge/testing/
-  
+      - apk add -U --no-cache ca-certificates sudo shadow bash file
+      - apk add -U --no-cache zig  -X https://dl-cdn.alpinelinux.org/alpine/edge/testing/
+
   add_and_config_user:
+    silent: true
+    desc: add the builder user
     cmds:
       - adduser --uid $USER_ID --ingroup root --system --shell /bin/bash --disabled-password $USER
       - echo "$USER ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USER
       - chmod 0440 /etc/sudoers.d/$USER
 
-  add_targets:
-    desc: Adds the cross compilation targets
+  install_rust:
+    desc: install rust and add targets
+    silent: true
+    preconditions:
+      - sh: "[ '{{.APK_ARCH}}' = 'x86_64' ] || [ '{{.APK_ARCH}}' = 'aarch64' ] "
+        msg: "unsupported architecture {{.APK_ARCH}}"
+    cmds:
+      - task: download_rust_init
+        vars:
+          RUST_ARCH: "{{.RUST_ARCH}}"
+          RUSTUP_SHA56: "{{.RUSTUP_SHA56}}"
+      - task: rust_init
+        vars:
+          RUST_ARCH: "{{.RUST_ARCH}}"
+          RUSTUP_SHA56: "{{.RUSTUP_SHA56}}"
+    vars:
+      # determine the current alpine architecture
+      APK_ARCH:
+        sh: apk --print-arch
+      # the rust architecture to use
+      RUST_ARCH:
+        sh: |
+          if [ "{{.APK_ARCH}}" = 'x86_64' ];
+          then 
+            echo 'x86_64-unknown-linux-musl'
+          elif [ "{{.APK_ARCH}}" = 'aarch64' ];
+          then
+            echo 'aarch64-unknown-linux-musl'
+          fi
+      # the SHA256 Checksum for rustup
+      RUSTUP_SHA56:
+        sh: |
+          if [ "{{.APK_ARCH}}" = 'x86_64' ];
+          then 
+            echo '241a99ff02accd2e8e0ef3a46aaa59f8d6934b1bb6e4fba158e1806ae028eb25'
+          elif [ "{{.APK_ARCH}}" = 'aarch64' ];
+          then
+            echo '6a2691ced61ef616ca196bab4b6ba7b0fc5a092923955106a0c8e0afa31dbce4'
+          fi
+
+  fix_permissions:
+    desc: set permissions on cargo home and rustup home to be accessible writable by all users
+    silent: false
+    cmds:
+      - chmod -R a+w $RUSTUP_HOME $CARGO_HOME
+
+  download_rust_init:
+    silent: false
+    cmds:
+      - "wget https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/{{.RUST_ARCH}}/rustup-init"
+      - echo "{{.RUSTUP_SHA56}} *rustup-init" | sha256sum -c -
+      - chmod +x rustup-init
+      - mv rustup-init /usr/local/bin
+
+  rust_init:
+    internal: true
+    silent: false
+    label: "rust_init_{{.RUST_ARCH}}"
     cmds:
       - >-
-        rustup target add x86_64-unknown-linux-musl
-        aarch64-unknown-linux-musl 
-        aarch64-apple-darwin
+        /usr/local/bin/rustup-init -y --no-modify-path --default-toolchain $RUST_VERSION --default-host "{{.RUST_ARCH}}"
+        --target x86_64-unknown-linux-gnu \
+         x86_64-unknown-linux-musl \
+         aarch64-unknown-linux-musl \
+         aarch64-unknown-linux-gnu \
+         aarch64-pc-windows-msvc \
+         x86_64-pc-windows-gnu \
+         x86_64-pc-windows-msvc \
+      - rm /usr/local/bin/rustup-init
