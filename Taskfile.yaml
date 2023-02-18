@@ -34,7 +34,7 @@ tasks:
   release:
     desc: prepare for release, git tag and push
     cmds:
-      - git tag -m "Release {{.RELEASE_TAG}}"
+      - git tag -m "Release {{.RELEASE_TAG}}" {{.RELEASE_TAG}}
       - git push origin --tags
     vars:
       RELEASE_TAG:
