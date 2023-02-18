@@ -16,7 +16,7 @@ tasks:
     desc: Installs required os packages
     silent: true
     cmds:
-      - apk add -U --no-cache ca-certificates sudo shadow bash file
+      - apk add -U --no-cache ca-certificates sudo shadow bash file alpine-sdk
       - apk add -U --no-cache zig  -X https://dl-cdn.alpinelinux.org/alpine/edge/testing/
 
   add_and_config_user:
