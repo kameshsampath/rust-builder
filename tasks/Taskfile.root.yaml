@@ -16,9 +16,20 @@ tasks:
     desc: Installs required os packages
     silent: true
     cmds:
-      - apk add -U --no-cache ca-certificates sudo shadow bash file alpine-sdk
-      - apk add -U --no-cache zig  -X https://dl-cdn.alpinelinux.org/alpine/edge/testing/
+      - apk add -U --no-cache ca-certificates sudo shadow bash curl curl-dev file musl musl-dev gcc
+      - task:install_zig
 
+  install_zig:
+    desc: install ziglang
+    silent: true
+    cmds:
+      - "curl -L https://ziglang.org/download/${ZIG_VERSION}/zig-linux-{{.APK_ARCH}}-$ZIG_VERSION.tar.xz | tar -J -x -C /usr/local"
+      - "ln -s /usr/local/zig-linux-{{.APK_ARCH}}-$ZIG_VERSION/zig /usr/local/bin/zig"
+    vars:
+      # determine the current alpine architecture
+      APK_ARCH:
+        sh: apk --print-arch
+  
   add_and_config_user:
     silent: true
     desc: add the builder user
@@ -91,8 +102,5 @@ tasks:
         --target x86_64-unknown-linux-gnu \
          x86_64-unknown-linux-musl \
          aarch64-unknown-linux-musl \
-         aarch64-unknown-linux-gnu \
-         aarch64-pc-windows-msvc \
-         x86_64-pc-windows-gnu \
-         x86_64-pc-windows-msvc \
+         aarch64-unknown-linux-gnu
       - rm /usr/local/bin/rustup-init

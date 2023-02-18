@@ -22,7 +22,7 @@ tasks:
       - "{{.DOCKER_FILE}}"
       -  "tasks/**/*.yaml"
     cmds:
-      - docker buildx build --no-cache --builder="{{.BUILDER}}" -t "{{.IMAGE}}" --push --platform=linux/amd64 --platform=linux/arm64 -f {{.DOCKER_FILE}} .
+      - docker buildx build --no-cache-filter="final" --builder="{{.BUILDER}}" -t "{{.IMAGE}}" --push --platform=linux/amd64 --platform=linux/arm64 -f {{.DOCKER_FILE}} .
 
   builder-debug:
     desc: run and shell into builder image, usually used for testing and debugging
