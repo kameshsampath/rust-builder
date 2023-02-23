@@ -2,40 +2,163 @@
 
 version: "3"
 
-vars:
-  BUILDER: buildx-multi-arch
-  IMAGE: kameshsampath/rust-zig-builder:test
-  DOCKER_FILE: Dockerfile
+env:
+  LIMA_INSTANCE: rust-apko-lima-vm
+  SDK_IMAGE: ghcr.io/kameshsampath/melange
+  BUILDER_IMAGE: quay.io/kameshsampath/rust-zig-builder
 
 tasks:
-  prepare-buildx:
-    desc: prepare the docker buildx environment
-    cmds:
-      - docker buildx inspect "{{.BUILDER}}" || docker buildx create --name="{{.BUILDER}}" --driver=docker-container --driver-opt=network=host
+  build_env:
+    aliases:
+      - dev_env
+    desc: build container image to run apko and melange commands
     silent: true
-
-  builder-image:
-    desc: build the rust builder image that will be used with ci task. The builder can build targets for linux arm64/amd64
-    deps:
-      - prepare-buildx
-    sources:
-      - "{{.DOCKER_FILE}}"
-      -  "tasks/**/*.yaml"
     cmds:
-      - docker buildx build --no-cache-filter="final" --builder="{{.BUILDER}}" -t "{{.IMAGE}}" --push --platform=linux/amd64 --platform=linux/arm64 -f {{.DOCKER_FILE}} .
-
-  builder-debug:
-    desc: run and shell into builder image, usually used for testing and debugging
-    deps:
-      - builder-image
-    cmds:
-      - docker run -it --rm -v "$PWD/test:/work" -w "/work" "{{.IMAGE}}"
-
-  release:
-    desc: prepare for release, git tag and push
-    cmds:
-      - git tag -m "Release {{.RELEASE_TAG}}" {{.RELEASE_TAG}}
-      - git push origin --tags
+      - >-
+        docker buildx inspect "{{.BUILDER}}" || docker buildx create --name="{{.BUILDER}}" --driver=docker-container --driver-opt=network=host
+      - >-
+        docker buildx build --no-cache --builder {{.BUILDER}} \
+          -t {{.SDK_IMAGE}} --load \
+          -f Dockerfile .
     vars:
-      RELEASE_TAG:
-        sh: svu next
+      BUILDER: buildx-multi-arch
+
+  dev_shell:
+    aliases:
+      - shell
+    silent: true
+    desc: shell into the development container
+    cmds:
+      - docker run --privileged -it -v "$PWD:/work" -w /work --rm {{.SDK_IMAGE}} bash
+
+  delete_build_env:
+    desc: stop and delete lima-vm {{.LIMA_INSTANCE}}
+    silent: true
+    cmds:
+      - docker rmi {{.SDK_IMAGE}}
+
+  build_packages:
+    aliases:
+      - packages
+    desc: |
+      Builds the drone plugin and its dependant packages
+    silent: true
+    cmds:
+      - task: pkg_rust_zig_builder
+
+  pkg_rust_zig_builder:
+    internal: true
+    sources:
+      - "{{.PACKAGE_NAME}}.yaml"
+    generates:
+      - "packages/aarch64/{{.PACKAGE_NAME}}-{{.PACKAGE_VERSION}}-r0.apk"
+      - "packages/x86_64/{{.PACKAGE_NAME}}-{{.PACKAGE_VERSION}}-r0.apk"
+    cmds:
+      - task: package
+        vars:
+          PACKAGE_NAME: "{{.PACKAGE_NAME}}"
+          PACKAGE_VERSION: "{{.PACKAGE_VERSION}}"
+    vars:
+      PACKAGE_NAME: rust-zig-builder
+      PACKAGE_VERSION: 0.0.1
+  
+  build_builder_image:
+    aliases:
+      - image
+    desc: |
+      Build the rust-zig builder image
+    silent: true
+    deps:
+      - build_plugin_packages
+    cmds:
+      - mkdir -p dist/{{.NAME}}
+      - task: image_arm64
+      - task: image_amd64
+
+  load:
+    desc: loads the plugin image to local docker daemon
+    silent: true
+    deps:
+      - build_builder_image
+    cmds:
+      - docker load < {{.ROOT_DIR}}/dist/{{.NAME}}/container_$(uname -m).tar
+
+  gen_key:
+    desc: genrates package signing key
+    silent: true
+    status:
+      - test -f melange.rsa
+      - test -f melange.rsa.pub
+    cmds:
+      - docker run --privileged -v "$PWD:/work" -w "/work" {{.SDK_IMAGE}} melange keygen
+
+  # creates the apk package
+  package:
+    desc: builds the apk package
+    silent: false
+    internal: true
+    label: "package-{{.PACKAGE_NAME}}"
+    sources:
+      - "{{.PACKAGE_NAME}}.yaml"
+    generates:
+      - "packages/aarch64/{{.PACKAGE_NAME}}-{{.PACKAGE_VERSION}}-r0.apk"
+      - "packages/x86_64/{{.PACKAGE_NAME}}-{{.PACKAGE_VERSION}}-r0.apk"
+    cmds:
+      - >-
+        docker run --rm --privileged \
+          -v "$PWD:/work"  \
+          -w "/work" \
+          {{.SDK_IMAGE}} \
+          melange build --arch=amd64 \
+          --signing-key melange.rsa \
+          rust-zig-builder.yaml
+
+  # publishes the plugin image
+  publish_plugin:
+    desc: publishes the rust-zig-builder image to remote registry
+    silent: false
+    deps:
+      - packages
+    preconditions:
+      - sh: '! crane manifest {{.BUILDER_IMAGE}}:{{.TAG}} &>/dev/null && true'
+        msg: "{{.TAG}} for image {{.BUILDER_IMAGE}} already exists, skipping build"
+    cmds:
+      - limactl shell {{.LIMA_INSTANCE}} sudo su -c "echo \"${QUAYIO_PASSWORD}\" | crane auth login quay.io -u \"${QUAYIO_USERNAME}\" --password-stdin"
+      - limactl shell {{.LIMA_INSTANCE}} sudo su -c "apko publish --arch=arm64,amd64 image.yaml {{.BUILDER_IMAGE}}:{{.TAG}}"
+      - limactl shell {{.LIMA_INSTANCE}} sudo su -c "crane tag "{{.BUILDER_IMAGE}}:{{.TAG}}" latest"
+    vars:
+      TAG:
+       sh: svu patch --strip-prefix
+
+  # builds the image
+  image_arm64:
+    silent: false
+    internal: true
+    label: "plugin-arm64-image"
+    sources:
+      - image.yaml
+      - rust-zig-builder.yaml
+    generates:
+      - dist/rust-zig-builder/container_arm64.tar
+    cmds:
+      - limactl shell {{.LIMA_INSTANCE}} sudo su -c "apko build --build-arch=arm64 $IMAGE_FILE $PUBLISH_REPO ./dist/{{.NAME}}/container_arm64.tar --debug"
+
+  image_amd64:
+    silent: true
+    internal: true
+    label: "plugin-amd64-image"
+    sources:
+      - image.yaml
+      - rust-zig-builder.yaml
+    generates:
+      - dist/rust-zig-builder/container_amd64.tar
+    cmds:
+      - limactl shell {{.LIMA_INSTANCE}} sudo su -c "apko build --build-arch=arm64,amd64 $IMAGE_FILE $PUBLISH_REPO ./dist/{{.NAME}}/container_amd64.tar --debug"
+
+  clean:
+    desc: Cleans the packages and dist directory
+    silent: true
+    cmds:
+      - rm -rf packages
+      - rm -rf dist
+      - mkdir -p dist packages

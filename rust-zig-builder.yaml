@@ -1,0 +1,151 @@
+# Copyright 2022 Kamesh Sampath<kamesh.sampath@hotmail.com>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+#  Rust builder
+#
+# This image configuration is used by the apko-drone plugin to build
+# OCI container images from APK packages
+#
+package:
+  name: rust-zig-builder
+  version: 0.0.1
+  epoch: 0
+  description: "Build the musl cross compilers for linux"
+  target-architecture:
+    - arm64
+    - amd64
+  copyright:
+    - paths:
+        - "*"
+      license: Apache-2.0
+  dependencies:
+    runtime:
+      - ca-certificates-bundle
+      - busybox
+      - alpine-keys
+      - gcc
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      #  - https://dl-cdn.alpinelinux.org/alpine/edge/main
+      # - https://dl-cdn.alpinelinux.org/alpine/edge/community
+      - https://packages.wolfi.dev/os
+    packages:
+      - alpine-keys
+      - busybox
+      - build-base
+      - gcc
+      - curl
+      - wget
+      - rustup
+
+pipeline:
+  - assertions:
+      required-steps: 1
+    # TODO: replace stable with $RUST_VERSION
+    pipeline:
+      - if: ${{build.arch}} == 'x86_64'
+        runs: |
+          set +x 
+          DEST_DIR="${{targets.destdir}}/usr/local"
+          
+          export CARGO_HOME="$DEST_DIR/cargo"
+          export RUSTUP_HOME="$DEST_DIR/rustup"
+
+          mkdir -p "$DEST_DIR" "$CARGO_HOME" "$RUSTUP_HOME"
+
+          echo "CARGO_HOME: $CARGO_HOME"
+          echo "RUSTUP_HOME: $RUSTUP_HOME"
+
+          rustup-init -y --profile=minimal --no-modify-path \
+          --default-toolchain=stable \
+          --default-host "${{host.triplet.rust}}" \
+          --target "${{host.triplet.rust}}" aarch64-unknown-linux-musl
+
+      - if: ${{build.arch}} == 'aarch64'
+        runs: |
+          export DEST_DIR="${{targets.destdir}}/usr/local"
+          export CARGO_HOME="$DEST_DIR/cargo"
+          export RUSTUP_HOME="$DEST_DIR/rustup"
+
+          mkdir -p "$DEST_DIR" "$CARGO_HOME" "$RUSTUP_HOME"
+
+          echo "CARGO_HOME: $CARGO_HOME"
+          echo "RUSTUP_HOME: $RUSTUP_HOME"
+
+          rustup-init -y --profile=minimal --no-modify-path \
+          --default-toolchain=stable \
+          --default-host "${{host.triplet.rust}}" \
+          --target "${{host.triplet.rust}}" x86_64-unknown-linux-musl
+  
+  - name: checkout cargo-zigbuild
+    uses: git-checkout
+    with:
+      repository: https://github.com/rust-cross/cargo-zigbuild
+      branch: v0.16.0
+      destination: cargo-zigbuild
+  
+  - name: build cargo-zigbuild
+    runs: |
+       set -eux
+
+       cd cargo-zigbuild
+      
+       DEST_DIR="${{targets.destdir}}/usr/local"
+       export CARGO_HOME="$DEST_DIR/cargo"
+       export RUSTUP_HOME="$DEST_DIR/rustup"
+       
+       . "$CARGO_HOME/env"
+
+       cargo build --profile=release
+
+       rm -rf "$CARGO_HOME/registry"
+
+  - assertions:
+      required-steps: 1
+    pipeline:
+      - if: ${{build.arch}} == 'x86_64'
+        name: download ziglang
+        uses: fetch
+        with:
+          uri: https://ziglang.org/download/0.10.1/zig-linux-${{build.arch}}-0.10.1.tar.xz
+          expected-sha256: 6699f0e7293081b42428f32c9d9c983854094bd15fee5489f12c4cf4518cc380
+      - if: ${{build.arch}} == 'aarch64'
+        name: download ziglang
+        uses: fetch
+        with:
+          uri: https://ziglang.org/download/0.10.1/zig-linux-${{build.arch}}-0.10.1.tar.xz
+          expected-sha256: db0761664f5f22aa5bbd7442a1617dd696c076d5717ddefcc9d8b95278f71f5d
+
+  - name: install ziglang
+    runs: |
+      set +x 
+      # ls -ltra
+      DEST_DIR="${{targets.destdir}}/usr/local/bin"
+      mkdir -p "$DEST_DIR"
+      install -Dm755 zig "$DEST_DIR/zig"
+
+  - name: install taskfile
+    uses: go/install
+    with:
+     package: github.com/go-task/task/v3/cmd/task@latest
+
+  - name: print version info
+    runs: |
+      DEST_DIR="${{targets.destdir}}/usr/local/bin"
+      echo "zig version: $(${{targets.destdir}}/usr/local/bin/zig version)"
+      ${{targets.destdir}}/usr/local/cargo/bin/cargo-zigbuild --version

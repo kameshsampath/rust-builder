@@ -1,3 +1,6 @@
 .env
 .envrc
 .task
+*.rsa
+packages
+dist

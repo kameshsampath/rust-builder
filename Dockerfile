@@ -1,41 +1,21 @@
 #syntax=docker/dockerfile:1.3-labs
 
-FROM --platform=$TARGETPLATFORM rust:1.67-alpine3.17 AS bins
+FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/git AS git
 
-ARG TARGETPLATFORM
+WORKDIR /src
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-  apk add -U --no-cache alpine-sdk gcompat go-task \
-  && cargo install cargo-zigbuild
+RUN  git clone --depth=1 https://github.com/chainguard-dev/melange 
 
-## The core builder that can be used to build rust applications
-FROM --platform=$TARGETPLATFORM alpine:3.17 as final
+FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/sdk AS sdk
 
-ARG TARGETPLATFORM
-ARG rust_version=1.67.1
-ARG rustup_version=1.25.2
-ARG user_id=1001
-ARG user=builder
+FROM --platform=$TARGETPLATFORM alpine:3.17
 
-ENV USER_ID=$user_id \
-  USER=$user \
-  RUST_VERSION=$rust_version \
-  RUSTUP_VERSION=$rustup_version \
-  RUSTUP_HOME=/usr/local/rustup \
-  CARGO_HOME=/usr/local/cargo \
-  PATH=/usr/local/cargo/bin:$PATH \
-  RUST_VERSION=1.67.1
+RUN apk add -U bash file bubblewrap \
+    && apk add -U go-task -X https://dl-cdn.alpinelinux.org/alpine/edge/community \
+    && mkdir -p /usr/share/melange
 
-COPY --from=bins /usr/bin/go-task /usr/local/bin/task
+COPY --from=git /src/melange/pkg/build/pipelines /usr/share/melange/
 
-COPY --from=bins /usr/local/cargo/bin/cargo-zigbuild /usr/local/cargo/bin/
+COPY --from=sdk /usr/bin/melange /usr/bin/apko /usr/bin/
 
-COPY tasks/Taskfile.root.yaml ./Taskfile.yaml
-
-RUN task
-
-# default run as root
-
-# USER $USER
-
-# ENV PATH=/usr/local/cargo/bin:$PATH
+CMD ["bash","-l"]
